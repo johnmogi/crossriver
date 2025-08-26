@@ -1,0 +1,320 @@
+:root {
+  --jobs-bg: #1a0d32;
+  --card-bg: #2a184a;
+  --card-border: rgba(255,255,255,.18);
+  --text-main: #ffffff;
+  --text-dim: rgba(255,255,255,.7);
+}
+#careers { direction: rtl; color: var(--text-main); background: transparent; }
+.cr-jobs-display {
+  overflow: visible;
+  position: relative;
+  padding-bottom: 60px;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+.cr-jobs-display .cr-job-slide {
+  height: auto;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  margin-bottom: 20px;
+  width: 300px;
+  display: inline-block;
+  margin-right: 20px;
+  vertical-align: top;
+}
+
+#careers .job-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  transition: box-shadow .2s ease, border-color .2s ease;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#careers .job-card:hover {
+  border-color: rgba(255,255,255,.32);
+  box-shadow: 0 16px 40px rgba(0,0,0,.28);
+}
+
+/* Titles white + Heebo */
+#careers .job-card .job-title {
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 700;
+  font-size: clamp(18px, 2.1vw, 22px);
+  line-height: 1.35;
+  color: #ffffff;
+  margin: 0;
+  text-align: center;
+}
+
+/* Meta */
+#careers .job-card .job-meta {
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* CTA white bg + deep text + Heebo */
+#careers .job-card .job-cta { margin-top: auto; text-align: center; }
+#careers .job-card .job-cta a {
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  display: inline-block;
+  font-size: 14px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid #ffffff;
+  background: #ffffff;
+  color: var(--jobs-bg);
+  text-decoration: none;
+  outline: none;
+  box-shadow: none;
+}
+#careers .job-card .job-cta a:hover { filter: brightness(0.95); }
+#careers .job-card .job-cta a:focus { outline: none; box-shadow: none; }
+
+/* Job Filters */
+.cr-jobs-filters {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 30px;
+  direction: rtl;
+  padding: 20px 0;
+}
+
+.cr-filter-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-main);
+  padding: 12px 20px;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.cr-filter-btn:before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, var(--category-color, #3498db), rgba(255,255,255,0.1));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.cr-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+.cr-filter-btn:hover:before {
+  opacity: 0.1;
+}
+
+.cr-filter-btn.active {
+  background: #ffffff;
+  color: var(--jobs-bg);
+  border-color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+}
+
+.cr-filter-btn.active:before {
+  opacity: 0;
+}
+
+.cr-filter-btn i {
+  font-size: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.cr-filter-btn span {
+  position: relative;
+  z-index: 1;
+}
+
+.cr-filter-btn .cr-job-count {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-main);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.cr-filter-btn.active .cr-job-count {
+  background: var(--jobs-bg);
+  color: #ffffff;
+}
+
+/* Container styling */
+.cr-jobs-display-container {
+  background: transparent;
+  padding: 0;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Job card enhancements */
+.cr-jobs-display .cr-job-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  transition: all .3s ease;
+  height: 100%;
+  display: flex !important;
+  flex-direction: column;
+  gap: 15px;
+  visibility: visible !important;
+  opacity: 1 !important;
+  min-height: 200px;
+}
+
+.cr-jobs-display .cr-job-card:hover {
+  border-color: rgba(255,255,255,.32);
+  box-shadow: 0 16px 40px rgba(0,0,0,.28);
+  transform: translateY(-5px);
+}
+
+.cr-jobs-display .cr-job-title {
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-weight: 700;
+  font-size: clamp(16px, 2vw, 20px);
+  line-height: 1.4;
+  color: #ffffff !important;
+  margin: 0 0 10px 0;
+  text-align: center;
+  display: block !important;
+  visibility: visible !important;
+}
+
+.cr-jobs-display .cr-jobs-wrapper {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  text-align: center;
+}
+
+.cr-jobs-display .cr-job-location,
+.cr-jobs-display .cr-job-type {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.cr-jobs-display .cr-job-location i,
+.cr-jobs-display .cr-job-type i {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.cr-jobs-display .cr-job-link {
+  font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 25px;
+  border: 1px solid #ffffff;
+  background: #ffffff;
+  color: var(--jobs-bg) !important;
+  text-decoration: none;
+  margin-top: auto;
+  transition: all 0.3s ease;
+  visibility: visible !important;
+}
+
+.cr-jobs-display .cr-job-link:hover {
+  background: rgba(255,255,255,0.9);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(255,255,255,0.3);
+}
+
+.cr-jobs-display .cr-job-link i {
+  font-size: 12px;
+}
+
+/* Bottom-centered nav with unique class names */
+#careers .cr-jobs-nav {
+  position: absolute !important;
+  left: 50% !important;
+  bottom: 16px !important;
+  transform: translateX(-50%) !important;
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 14px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 20 !important;
+  white-space: nowrap !important;
+}
+#careers .cr-jobs-button {
+  width: 44px; height: 44px; border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: rgba(255,255,255,.08);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  outline: none;
+  box-shadow: none;
+}
+#careers .cr-jobs-button:hover { border-color: #ffffff; background: rgba(255,255,255,.14); }
+#careers .cr-jobs-button:focus { outline: none; box-shadow: none; }
+
+/* Chevrons */
+#careers .cr-jobs-button::before {
+  content: "";
+  width: 12px; height: 12px;
+  border-top: 2px solid #fff;
+  border-right: 2px solid #fff;
+  display: block;
+}
+/* In RTL: prev points right (>) and next points left (<) */
+#careers .cr-jobs-button.prev::before { transform: rotate(45deg); }
+#careers .cr-jobs-button.next::before { transform: rotate(225deg); }
+
+/* Hide dots */
+#careers .swiper-pagination { display: none !important; }
+
+/* Keep ONLY slider + our nav visible under #careers */
+#careers > :not(.swiper):not(.cr-jobs-nav):not(.comeet-job-slider-container) { display: none !important; }
+
+/* RTL Swiper */
+html[dir="rtl"] #careers .swiper { direction: rtl; }
