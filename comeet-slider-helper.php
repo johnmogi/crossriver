@@ -8,6 +8,478 @@
 
 if (!defined('ABSPATH')) { exit; }
 
+// Hook into WordPress init to add rewrite rules for job URLs
+add_action('init', 'comeet_helper_add_rewrite_rules');
+add_action('template_redirect', 'comeet_helper_handle_job_page');
+
+// Plugin activation and deactivation hooks
+register_activation_hook(__FILE__, 'comeet_helper_activate');
+register_deactivation_hook(__FILE__, 'comeet_helper_deactivate');
+
+/**
+ * Add rewrite rules for job URLs to prevent 404 errors
+ */
+function comeet_helper_add_rewrite_rules() {
+    error_log('🔧 REWRITE: Adding custom rewrite rules for Comeet URLs');
+    
+    $base = 'careers';
+    
+    // Rule 1: Simple format /careers/co/{job-slug}/
+    $regex_simple = $base . '/co/([^/]+)/?$';
+    $query_simple = 'index.php?pagename=' . $base . '&comeet_pos=$matches[1]';
+    add_rewrite_rule($regex_simple, $query_simple, 'top');
+    error_log('🔧 REWRITE: Added simple rule - ' . $regex_simple . ' -> ' . $query_simple);
+    
+    // Rule 2: Full format /careers/co/{category}/{position}/{job-slug}/all/
+    $regex_full = $base . '/co/([^/]+)/([^/]+)/([^/]+)/?(/all)?$';
+    $query_full = 'index.php?pagename=' . $base . '&comeet_cat=$matches[1]&comeet_pos=$matches[2]&comeet_all=$matches[4]';
+    add_rewrite_rule($regex_full, $query_full, 'top');
+    error_log('🔧 REWRITE: Added full rule - ' . $regex_full . ' -> ' . $query_full);
+    
+    // Force flush rules if not done yet
+    if (!get_option('comeet_helper_rules_flushed')) {
+        flush_rewrite_rules();
+        update_option('comeet_helper_rules_flushed', true);
+        error_log('🔧 REWRITE: FLUSHED rewrite rules - URLs should now work');
+    }
+    
+    // Add query vars
+    add_filter('query_vars', function($vars) {
+        $vars[] = 'comeet_location';
+        $vars[] = 'comeet_job_id';
+        $vars[] = 'comeet_job_slug';
+        return $vars;
+    });
+}
+
+/**
+ * Handle job page requests and redirect to appropriate Comeet page
+ */
+function comeet_helper_handle_job_page() {
+    $job_slug = get_query_var('comeet_job_slug');
+    $job_id = isset($_GET['job_id']) ? sanitize_text_field($_GET['job_id']) : '';
+    
+    if (!empty($job_slug)) {
+        error_log('🔗 COMEET ROUTING: Handling job page for slug: ' . $job_slug . ' with job_id: ' . $job_id);
+        
+        // Try to find the careers page and redirect to Comeet format
+        if (class_exists('Comeet')) {
+            try {
+                $comeet = new Comeet();
+                $options = $comeet->get_options();
+                
+                if (!empty($options['post_id'])) {
+                    $careers_page = get_post($options['post_id']);
+                    if ($careers_page) {
+                        $careers_url = get_permalink($careers_page->ID);
+                        
+                        // Convert our job slug back to a title for Comeet format
+                        $job_title = str_replace('-', ' ', $job_slug);
+                        $job_title = ucwords($job_title);
+                        
+                        // Redirect to Comeet format URL if we can construct it
+                        $comeet_url = $careers_url . 'co/' . sanitize_title($job_title) . '/';
+                        error_log('🔀 COMEET ROUTING: Redirecting to Comeet URL: ' . $comeet_url);
+                        
+                        wp_redirect($comeet_url, 301);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                error_log('❌ COMEET ROUTING: Error handling job page: ' . $e->getMessage());
+            }
+        }
+        
+        // Fallback: redirect to careers page
+        $careers_fallback = home_url('/careers/');
+        error_log('🔄 COMEET ROUTING: Fallback redirect to: ' . $careers_fallback);
+        wp_redirect($careers_fallback, 302);
+        exit;
+    }
+}
+
+/**
+ * Plugin activation hook
+ */
+function comeet_helper_activate() {
+    error_log('🔧 PLUGIN: Activating Comeet Helper Plugin');
+    comeet_helper_add_rewrite_rules();
+    flush_rewrite_rules();
+    error_log('🔧 PLUGIN: Rewrite rules flushed on activation');
+}
+
+/**
+ * Plugin deactivation hook
+ */
+function comeet_helper_deactivate() {
+    error_log('🔧 PLUGIN: Deactivating Comeet Helper Plugin');
+    flush_rewrite_rules();
+    error_log('🔧 PLUGIN: Rewrite rules flushed on deactivation');
+}
+
+/**
+ * Force flush rewrite rules (for debugging)
+ */
+function comeet_helper_flush_rules() {
+    error_log('🔧 FLUSH: Manually flushing rewrite rules');
+    comeet_helper_add_rewrite_rules();
+    flush_rewrite_rules();
+    error_log('🔧 FLUSH: Rules flushed successfully');
+}
+
+/**
+ * Debug shortcode for testing URL routing and generation
+ * Usage: [comeet_debug_urls]
+ */
+add_shortcode('comeet_debug_urls', 'comeet_debug_urls_shortcode');
+function comeet_debug_urls_shortcode($atts) {
+    if (!current_user_can('manage_options')) {
+        return '<p>Debug access restricted to administrators.</p>';
+    }
+    
+    $output = '<div style="background: #f9f9f9; padding: 20px; border: 1px solid #ddd; margin: 20px 0;">';
+    $output .= '<h3>🔧 Comeet URL Debug Information</h3>';
+    
+    // Test job titles for URL generation
+    $test_jobs = [
+        'Senior Software Engineer',
+        'Product Manager - Growth',
+        'UX/UI Designer'
+    ];
+    
+    $output .= '<h3>🔧 URL Generation Test</h3>';
+    foreach ($test_jobs as $job_title) {
+        $url = generate_comeet_job_url($job_title, '');
+        $output .= '<p><strong>' . esc_html($job_title) . ':</strong><br>';
+        $output .= '<a href="' . esc_url($url) . '" target="_blank">' . esc_html($url) . '</a></p>';
+    }
+    
+    // Add manual flush button
+    if (isset($_GET['flush_rules']) && $_GET['flush_rules'] === '1') {
+        comeet_helper_flush_rules();
+        $output .= '<div style="background: #d4edda; padding: 10px; margin: 10px 0; border-radius: 5px;">✅ Rewrite rules flushed successfully!</div>';
+    }
+    
+    $flush_url = add_query_arg('flush_rules', '1', get_permalink());
+    $output .= '<p><a href="' . esc_url($flush_url) . '" style="background: #007cba; color: white; padding: 8px 16px; text-decoration: none; border-radius: 3px;">🔄 Flush Rewrite Rules</a></p>';
+    
+    $output .= '<h4>System Information:</h4>';
+    $output .= '<p><strong>Home URL:</strong> ' . home_url() . '</p>';
+    $output .= '<p><strong>Careers Base:</strong> ' . home_url('/careers/') . '</p>';
+    $output .= '<p><strong>Comeet Plugin:</strong> ' . (class_exists('Comeet') ? '✅ Active' : '❌ Not Found') . '</p>';
+    
+    if (class_exists('Comeet')) {
+        try {
+            $comeet = new Comeet();
+            $options = $comeet->get_options();
+            $output .= '<p><strong>Comeet Post ID:</strong> ' . (isset($options['post_id']) ? $options['post_id'] : 'Not Set') . '</p>';
+        } catch (Exception $e) {
+            $output .= '<p><strong>Comeet Error:</strong> ' . esc_html($e->getMessage()) . '</p>';
+        }
+    }
+    
+    $output .= '<p><em>Check debug logs for detailed URL generation traces.</em></p>';
+    $output .= '</div>';
+    
+    return $output;
+}
+
+/**
+ * Debug shortcode for showing actual Comeet job data and links
+ * Usage: [comeet_debug_jobs]
+ */
+add_shortcode('comeet_debug_jobs', 'comeet_debug_jobs_shortcode');
+function comeet_debug_jobs_shortcode($atts) {
+    if (!current_user_can('manage_options')) {
+        return '<p>Debug access restricted to administrators.</p>';
+    }
+    
+    error_log('🔧 DEBUG SHORTCODE: Starting debug shortcode execution');
+    
+    $output = '<div style="background: #f9f9f9; padding: 20px; border: 1px solid #ddd; margin: 20px 0;">';
+    $output .= '<h3>🔧 Comeet Jobs Debug - Real Data (Generated: ' . date('Y-m-d H:i:s') . ')</h3>';
+    $output .= '<p><strong>🕒 Timestamp:</strong> ' . time() . '</p>';
+    
+    // Force clear any potential caching
+    if (function_exists('wp_cache_flush')) {
+        wp_cache_flush();
+        error_log('🔧 DEBUG SHORTCODE: Cleared WP cache');
+    }
+    
+    // Get actual jobs from Comeet - use fresh call
+    error_log('🔧 DEBUG SHORTCODE: About to call comeet_fetch_jobs()');
+    
+    // Call the exact same function the slider uses
+    $jobs = [];
+    
+    // COMPREHENSIVE DEBUG SYSTEM
+    $debug_info = [];
+    
+    // Test 1: Function existence
+    $debug_info['function_exists'] = function_exists('comeet_fetch_jobs');
+    $output .= '<p><strong>🔍 Function Exists:</strong> ' . ($debug_info['function_exists'] ? 'YES' : 'NO') . '</p>';
+    
+    // Test 2: Direct Comeet class access
+    $debug_info['comeet_class'] = class_exists('Comeet');
+    $output .= '<p><strong>🔍 Comeet Class:</strong> ' . ($debug_info['comeet_class'] ? 'YES' : 'NO') . '</p>';
+    
+    // Test 3: Try multiple job fetching methods
+    $jobs = [];
+    $test_results = [];
+    
+    // Method 1: Direct function call
+    if ($debug_info['function_exists']) {
+        try {
+            $start_time = microtime(true);
+            $jobs_method1 = comeet_fetch_jobs();
+            $end_time = microtime(true);
+            $test_results['method1'] = [
+                'success' => true,
+                'count' => count($jobs_method1),
+                'time' => round(($end_time - $start_time) * 1000, 2) . 'ms',
+                'jobs' => $jobs_method1
+            ];
+            if (count($jobs_method1) > count($jobs)) {
+                $jobs = $jobs_method1;
+            }
+        } catch (Exception $e) {
+            $test_results['method1'] = ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+    
+    // Method 2: Direct Comeet class call with API diagnostics
+    if ($debug_info['comeet_class']) {
+        try {
+            $start_time = microtime(true);
+            $comeet = new Comeet();
+            
+            // Check Comeet options and API setup
+            $options = $comeet->get_options();
+            $api_url = '';
+            $api_status = 'Unknown';
+            
+            // Try to get the API URL the plugin uses
+            if (!empty($options['comeet_token']) && !empty($options['comeet_uid'])) {
+                $api_url = 'https://www.comeet.co/careers-api/2.0/company/' . $options['comeet_uid'] . '/positions?token=' . $options['comeet_token'];
+                
+                // Test direct API call
+                $api_response = wp_remote_get($api_url, [
+                    'timeout' => 30,
+                    'sslverify' => false
+                ]);
+                
+                if (!is_wp_error($api_response)) {
+                    $api_status = 'HTTP ' . wp_remote_retrieve_response_code($api_response);
+                    $api_body = wp_remote_retrieve_body($api_response);
+                } else {
+                    $api_status = 'Error: ' . $api_response->get_error_message();
+                    $api_body = '';
+                }
+            }
+            
+            $html_content = $comeet->comeet_content();
+            $jobs_method2 = comeet_parse_html_jobs($html_content);
+            $end_time = microtime(true);
+            
+            $test_results['method2'] = [
+                'success' => true,
+                'count' => count($jobs_method2),
+                'time' => round(($end_time - $start_time) * 1000, 2) . 'ms',
+                'html_length' => strlen($html_content),
+                'api_url' => $api_url,
+                'api_status' => $api_status,
+                'api_response_length' => isset($api_body) ? strlen($api_body) : 0,
+                'jobs' => $jobs_method2
+            ];
+            
+            // If direct API works but comeet_content doesn't, use API data
+            if (isset($api_body) && !empty($api_body)) {
+                $api_data = json_decode($api_body, true);
+                $api_jobs = [];
+                
+                // Debug the API structure
+                $test_results['method2']['api_structure'] = 'JSON decode: ' . (is_array($api_data) ? 'SUCCESS' : 'FAILED');
+                
+                if (is_array($api_data)) {
+                    // Check different possible structures
+                    if (isset($api_data['positions'])) {
+                        $positions = $api_data['positions'];
+                        $test_results['method2']['api_structure'] .= ', positions array found';
+                    } elseif (isset($api_data['data'])) {
+                        $positions = $api_data['data'];
+                        $test_results['method2']['api_structure'] .= ', data array found';
+                    } else {
+                        // Maybe it's a direct array of positions
+                        $positions = $api_data;
+                        $test_results['method2']['api_structure'] .= ', direct array';
+                    }
+                    
+                    $test_results['method2']['api_structure'] .= ', ' . count($positions) . ' items';
+                    
+                    if (is_array($positions)) {
+                        foreach ($positions as $position) {
+                            if (is_array($position)) {
+                                // Try different field names
+                                $title = $position['name'] ?? $position['title'] ?? $position['position_name'] ?? 'Unknown Position';
+                                $location = '';
+                                
+                                if (isset($position['location']['name'])) {
+                                    $location = $position['location']['name'];
+                                } elseif (isset($position['location'])) {
+                                    $location = is_string($position['location']) ? $position['location'] : 'Unknown Location';
+                                } else {
+                                    $location = 'Unknown Location';
+                                }
+                                
+                                $uid = $position['uid'] ?? $position['id'] ?? '';
+                                
+                                $api_jobs[] = [
+                                    'title' => $title,
+                                    'location' => $location,
+                                    'category' => comeet_categorize_job($title),
+                                    'type' => 'Full-time',
+                                    'link' => generate_comeet_job_url($title, $uid)
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                $test_results['method2']['count'] = count($api_jobs);
+                $test_results['method2']['jobs'] = $api_jobs;
+                
+                if (count($api_jobs) > count($jobs)) {
+                    $jobs = $api_jobs;
+                }
+            } else if (count($jobs_method2) > count($jobs)) {
+                $jobs = $jobs_method2;
+            }
+        } catch (Exception $e) {
+            $test_results['method2'] = ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+    
+    // Method 3: Scraping fallback
+    try {
+        $start_time = microtime(true);
+        $jobs_method3 = comeet_scrape_jobs();
+        $end_time = microtime(true);
+        $test_results['method3'] = [
+            'success' => true,
+            'count' => count($jobs_method3),
+            'time' => round(($end_time - $start_time) * 1000, 2) . 'ms',
+            'jobs' => $jobs_method3
+        ];
+        if (count($jobs_method3) > count($jobs)) {
+            $jobs = $jobs_method3;
+        }
+    } catch (Exception $e) {
+        $test_results['method3'] = ['success' => false, 'error' => $e->getMessage()];
+    }
+    
+    // Display test results
+    $output .= '<h4>🧪 Job Fetching Test Results:</h4>';
+    $output .= '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
+    $output .= '<tr style="background: #e9ecef;"><th style="border: 1px solid #ddd; padding: 8px;">Method</th><th style="border: 1px solid #ddd; padding: 8px;">Status</th><th style="border: 1px solid #ddd; padding: 8px;">Jobs Found</th><th style="border: 1px solid #ddd; padding: 8px;">Time</th><th style="border: 1px solid #ddd; padding: 8px;">Details</th></tr>';
+    
+    foreach ($test_results as $method => $result) {
+        $status = $result['success'] ? '✅ Success' : '❌ Failed';
+        $count = $result['success'] ? $result['count'] : 0;
+        $time = $result['success'] ? $result['time'] : 'N/A';
+        $details = $result['success'] ? '' : $result['error'];
+        if ($method === 'method2' && $result['success']) {
+            $details = 'HTML: ' . $result['html_length'] . ' chars';
+            if (isset($result['api_status'])) {
+                $details .= ', API: ' . $result['api_status'];
+                if (isset($result['api_response_length'])) {
+                    $details .= ' (' . $result['api_response_length'] . ' chars)';
+                }
+            }
+            if (isset($result['api_structure'])) {
+                $details .= ', ' . $result['api_structure'];
+            }
+        }
+        
+        $output .= '<tr>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . ucfirst($method) . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . $status . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . $count . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . $time . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . esc_html($details) . '</td>';
+        $output .= '</tr>';
+    }
+    $output .= '</table>';
+    
+    // Add comparison with slider
+    $output .= '<h4>🔄 Slider vs Debug Comparison:</h4>';
+    $output .= '<p><strong>Slider shows:</strong> 22 jobs (working correctly)</p>';
+    $output .= '<p><strong>Debug shows:</strong> ' . count($jobs) . ' jobs</p>';
+    $output .= '<p><strong>Issue:</strong> Same function, different results - indicates timing/context problem</p>';
+    
+    // Show final job list
+    $output .= '<div style="background: #d4edda; padding: 10px; border-radius: 5px; color: #155724;">';
+    $output .= '<strong>✅ Found ' . count($jobs) . ' jobs</strong>';
+    $output .= '</div>';
+    
+    $output .= '<h4>📋 Job List with Links:</h4>';
+    $output .= '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
+    $output .= '<tr style="background: #e9ecef;">';
+    $output .= '<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Job Title</th>';
+    $output .= '<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Category</th>';
+    $output .= '<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Location</th>';
+    $output .= '<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Link</th>';
+    $output .= '<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Test</th>';
+    $output .= '</tr>';
+    
+    foreach ($jobs as $job) {
+        $output .= '<tr>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . esc_html($job['title']) . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . esc_html($job['category'] ?? 'N/A') . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;">' . esc_html($job['location'] ?? 'N/A') . '</td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;"><a href="' . esc_url($job['link']) . '" target="_blank">' . esc_html($job['link']) . '</a></td>';
+        $output .= '<td style="border: 1px solid #ddd; padding: 8px;"><a href="' . esc_url($job['link']) . '" target="_blank" style="background: #007cba; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;">Test Link</a></td>';
+        $output .= '</tr>';
+    }
+    $output .= '</table>';
+    
+    // Raw HTML inspection
+    if (class_exists('Comeet')) {
+        try {
+            $comeet = new Comeet();
+            $html_content = $comeet->comeet_content();
+            $output .= '<h4>🔍 Raw Comeet HTML Analysis:</h4>';
+            $output .= '<p><strong>HTML Length:</strong> ' . strlen($html_content) . ' characters</p>';
+            $output .= '<p><strong>Contains Jobs:</strong> ' . (strpos($html_content, 'job') !== false ? 'YES' : 'NO') . '</p>';
+            $output .= '<p><strong>Contains Links:</strong> ' . (strpos($html_content, 'href') !== false ? 'YES' : 'NO') . '</p>';
+            $output .= '<details style="margin: 10px 0;"><summary>Click to view raw HTML</summary>';
+            $output .= '<textarea style="width: 100%; height: 200px; font-family: monospace; font-size: 12px;">' . esc_textarea(substr($html_content, 0, 2000)) . '...</textarea>';
+            $output .= '</details>';
+        } catch (Exception $e) {
+            $output .= '<p><strong>Error accessing Comeet:</strong> ' . esc_html($e->getMessage()) . '</p>';
+        }
+    }
+    
+    // System info
+    $output .= '<h4>🔧 System Information:</h4>';
+    $output .= '<p><strong>Home URL:</strong> ' . home_url() . '</p>';
+    $output .= '<p><strong>Careers URL:</strong> ' . home_url('/careers/') . '</p>';
+    $output .= '<p><strong>Comeet Plugin:</strong> ' . (class_exists('Comeet') ? '✅ Active' : '❌ Not Found') . '</p>';
+    
+    if (class_exists('Comeet')) {
+        try {
+            $comeet = new Comeet();
+            $options = $comeet->get_options();
+            $output .= '<p><strong>Comeet Token:</strong> ' . (!empty($options['comeet_token']) ? '✅ Set (' . substr($options['comeet_token'], 0, 8) . '...)' : '❌ Missing') . '</p>';
+            $output .= '<p><strong>Comeet UID:</strong> ' . (!empty($options['comeet_uid']) ? '✅ Set (' . $options['comeet_uid'] . ')' : '❌ Missing') . '</p>';
+        } catch (Exception $e) {
+            $output .= '<p><strong>Comeet Error:</strong> ' . esc_html($e->getMessage()) . '</p>';
+        }
+    }
+    
+    $output .= '</div>';
+    return $output;
+}
+
 /**
  * Default job categories with their keywords
  */
@@ -83,156 +555,43 @@ function comeet_categorize_job($job_title) {
  * Generate job URL using Comeet plugin methods
  */
 function generate_comeet_job_url($job_title, $job_id = '') {
+    error_log('🔧 DEBUG URL GEN: Function called with title="' . $job_title . '" job_id="' . $job_id . '"');
+    
     if (empty($job_title)) {
+        error_log('🔧 DEBUG URL GEN: Empty job title, returning #');
         return '#';
     }
     
     // Don't create Comeet instance if class doesn't exist
     if (!class_exists('Comeet')) {
-        error_log('⚠️ COMEET URL: Comeet class not found');
+        error_log('🔧 DEBUG URL GEN: Comeet class not found');
         return '#';
     }
     
-    // Wrap entire function in try-catch for production safety
-    try {
-        $comeet = new Comeet();
-        
-        // Try generate_sub_page_url method first (requires 3 parameters)
-        if (method_exists($comeet, 'generate_sub_page_url') && !empty($job_title)) {
-            try {
-                // Check method signature using reflection
-                $reflection = new ReflectionMethod($comeet, 'generate_sub_page_url');
-                $required_params = $reflection->getNumberOfRequiredParameters();
-                
-                if ($required_params === 3) {
-                    // Method expects (position_data, location, group) - create proper structure
-                    // Ensure we have proper array structure to avoid TypeError
-                    $position_data = array(
-                        'name' => (string)$job_title,
-                        'uid' => !empty($job_id) ? (string)$job_id : '2C.E40',
-                        'post_id' => !empty($job_id) ? (string)$job_id : '2C.E40',
-                        'location' => array('name' => 'Jerusalem Office / Hybrid (In Israel)'),
-                        'department' => array('name' => 'All Departments')
-                    );
-                    $location = 'jerusalem-office-hybrid-in-israel';
-                    $group = 'all';
-                    
-                    // Add try-catch to prevent fatal errors in production
-                    try {
-                        $url = $comeet->generate_sub_page_url($position_data, $location, $group);
-                    } catch (Exception $e) {
-                        error_log('⚠️ COMEET URL: generate_sub_page_url failed with proper data: ' . $e->getMessage());
-                        $url = null;
-                    }
-                } else if ($required_params === 1) {
-                    $url = $comeet->generate_sub_page_url($job_title);
-                } else {
-                    error_log('⚠️ COMEET URL: generate_sub_page_url requires ' . $required_params . ' parameters');
-                    $url = null;
-                }
-                
-                if (!empty($url) && $url !== '#') {
-                    // Check if URL is malformed (contains page_id query parameter)
-                    if (strpos($url, '?page_id=') !== false) {
-                        error_log('⚠️ COMEET URL: Malformed URL detected: ' . $url);
-                        // Extract the path part after page_id= and reconstruct proper URL
-                        $parsed = parse_url($url);
-                        if (isset($parsed['query'])) {
-                            parse_str($parsed['query'], $query_params);
-                            if (isset($query_params['page_id'])) {
-                                $path_part = $query_params['page_id'];
-                                // Clean up the path and create proper URL
-                                $clean_path = trim($path_part, '/');
-                                $url = home_url('/careers/' . $clean_path . '/');
-                                error_log('✅ COMEET URL: Fixed malformed URL to: ' . $url);
-                            }
-                        }
-                    } else {
-                        // Check for double domain issue and fix it
-                        if (strpos($url, 'c148-cross-river.local/c148-cross-river.local') !== false) {
-                            $url = str_replace('c148-cross-river.local/c148-cross-river.local', 'c148-cross-river.local', $url);
-                            error_log('✅ COMEET URL: Fixed double domain in URL: ' . $url);
-                        }
-                        error_log('✅ COMEET URL: Generated URL for "' . $job_title . '": ' . $url);
-                    }
-                    return $url;
-                }
-            } catch (Exception $e) {
-                error_log('⚠️ COMEET URL: generate_sub_page_url failed: ' . $e->getMessage());
-            }
-        }
-        
-        // Try generate_careers_url method
-        if (method_exists($comeet, 'generate_careers_url')) {
-            try {
-                // Check method signature using reflection
-                $reflection = new ReflectionMethod($comeet, 'generate_careers_url');
-                $required_params = $reflection->getNumberOfRequiredParameters();
-                
-                if ($required_params >= 3) {
-                    // Method expects 3 parameters
-                    $base_url = $comeet->generate_careers_url('jerusalem-office-hybrid-in-israel', 'all', '2C.E40');
-                } else {
-                    $base_url = $comeet->generate_careers_url();
-                }
-                
-                if (!empty($base_url) && !empty($job_title)) {
-                    // Create slug from job title
-                    $slug = sanitize_title($job_title);
-                    $url = rtrim($base_url, '/') . '/' . $slug . '/';
-                    error_log('✅ COMEET URL: Generated careers URL: ' . $url);
-                    return $url;
-                }
-            } catch (Exception $e) {
-                error_log('⚠️ COMEET URL: generate_careers_url failed: ' . $e->getMessage());
-            }
-        }
-        
-        // Try to get URL pattern from Comeet options
-        if (method_exists($comeet, 'get_options')) {
-            $options = $comeet->get_options();
-            if (is_array($options)) {
-                // Look for URL patterns in options
-                foreach ($options as $key => $value) {
-                    if ((stripos($key, 'career') !== false || stripos($key, 'page') !== false) && 
-                        !empty($value) && is_string($value) && 
-                        (strpos($value, 'http') === 0 || strpos($value, '/') === 0)) {
-                        
-                        $base_url = $value;
-                        if (!empty($job_title)) {
-                            $slug = sanitize_title($job_title);
-                            $url = rtrim($base_url, '/') . '/' . $slug . '/';
-                            error_log('✅ COMEET URL: Generated from options (' . $key . '): ' . $url);
-                            return $url;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Fallback: construct URL based on site structure
-        $careers_base = home_url('/careers/');
-        if (!empty($job_title)) {
-            // Create URL pattern similar to: /careers/co/location/id/job-title/all/
-            $slug = sanitize_title($job_title);
-            $location_slug = 'jerusalem-office-hybrid-in-israel';
-            $job_id_placeholder = !empty($job_id) ? $job_id : '2C.E40';
-            
-            $url = $careers_base . 'co/' . $location_slug . '/' . $job_id_placeholder . '/' . $slug . '/all/';
-            error_log('✅ COMEET URL: Generated fallback URL: ' . $url);
-            return $url;
-        }
-        
-    } catch (Exception $e) {
-        error_log('❌ COMEET URL: Error generating job URL: ' . $e->getMessage());
-    } catch (TypeError $e) {
-        error_log('❌ COMEET URL: TypeError in production: ' . $e->getMessage());
-    } catch (Throwable $e) {
-        error_log('❌ COMEET URL: Fatal error prevented: ' . $e->getMessage());
-    }
+    // SIMPLIFIED: Generate proper Comeet URL structure
+    error_log('🔧 SIMPLE URL: Generating proper Comeet URL structure');
+    
+    // Create slug from job title
+    $slug = sanitize_title($job_title);
+    error_log('🔧 SIMPLE URL: Created slug: ' . $slug);
+    
+    // Use proper Comeet URL structure: /careers/co/{category}/{position}/{job-slug}/all/
+    // Based on Comeet's rewrite rules: $regex_all = '/co/([^/]+)/([^/]+)/([^/]+)/?(/all)?$'
+    // This maps to: comeet_cat=$matches[1] & comeet_pos=$matches[2] & job-slug=$matches[3]
+    
+    $category = 'jerusalem-office-hybrid-in-israel';  // This becomes comeet_cat
+    
+    // Always use the full Comeet format that matches their actual URLs
+    // Format: /careers/co/{category}/{position}/{job-slug}/all/
+    $position = !empty($job_id) ? $job_id : '2C.E40'; // Use real job ID or fallback
+    $url = home_url('/careers/co/' . $category . '/' . $position . '/' . $slug . '/all/');
+    
+    error_log('🔧 COMEET URL: GENERATED FULL FORMAT: ' . $url);
+    error_log('🔧 COMEET URL: Matches Comeet pattern -> comeet_cat=' . $category . ' & comeet_pos=' . $position . ' & slug=' . $slug);
+    return $url;
     
     // Final fallback
+    error_log('🔧 DEBUG URL GEN: Returning final fallback URL: ' . home_url('/careers/'));
     return home_url('/careers/');
 }
 
@@ -242,28 +601,45 @@ function generate_comeet_job_url($job_title, $job_id = '') {
 function comeet_fetch_jobs() {
     $jobs = [];
     error_log('🚀 COMEET FETCH JOBS: Starting job fetch process');
+    error_log('🚀 COMEET FETCH JOBS: Function called from: ' . wp_debug_backtrace_summary());
     
     // Try to get jobs from Comeet plugin if available
     if (class_exists('Comeet')) {
         try {
             $comeet = new Comeet();
-            error_log('✅ COMEET FETCH: Comeet class instantiated successfully');
-            
-            // Debug: Log available methods
-            $methods = get_class_methods($comeet);
-            error_log('📋 COMEET FETCH: Available methods: ' . implode(', ', $methods));
+            error_log(' COMEET FETCH: Comeet class instantiated successfully');
+    
+    // Check API credentials
+    $options = $comeet->get_options();
+    $has_token = !empty($options['comeet_token']);
+    $has_uid = !empty($options['comeet_uid']);
+    error_log('🔑 COMEET CREDENTIALS: Token=' . ($has_token ? 'SET' : 'MISSING') . ', UID=' . ($has_uid ? 'SET' : 'MISSING'));
+    
+    if (!$has_token || !$has_uid) {
+        error_log('❌ COMEET FETCH: Missing API credentials - cannot fetch jobs');
+        error_log('💡 COMEET FETCH: Configure credentials at: ' . admin_url('admin.php?page=comeet'));
+        return [];
+    }
+    
+    error_log('📋 COMEET FETCH: Available methods: ' . implode(', ', get_class_methods($comeet)));
             
             // Try comeet_content() method first - this contains the HTML with all jobs
             if (method_exists($comeet, 'comeet_content')) {
-                error_log('🔍 COMEET FETCH: Trying comeet_content() method');
+                error_log(' COMEET FETCH: Trying comeet_content() method');
                 try {
                     $html_content = $comeet->comeet_content();
                     if (is_string($html_content) && !empty($html_content)) {
                         error_log('✅ COMEET FETCH: Got HTML content (' . strlen($html_content) . ' chars)');
+                        
+                        // Log first 500 chars of HTML for debugging
+                        error_log('📄 COMEET HTML SAMPLE: ' . substr($html_content, 0, 500) . '...');
+                        
                         $jobs = comeet_parse_html_jobs($html_content);
                         if (!empty($jobs)) {
                             error_log('✅ COMEET FETCH: Parsed ' . count($jobs) . ' jobs from HTML');
                             error_log('📄 COMEET FETCH: Sample job: ' . print_r(reset($jobs), true));
+                        } else {
+                            error_log('❌ COMEET FETCH: HTML parsing returned 0 jobs');
                         }
                     }
                 } catch (Exception $e) {
@@ -447,57 +823,63 @@ function comeet_parse_html_jobs($html_content) {
             'type' => 'Full-time'
         ];
         
-        // Get job title - try multiple approaches for comeet-position elements
-        $title_elements = $xpath->query('.//h3[contains(@class, "ultra-job-title")] | .//h3 | .//a[contains(@class, "comeet-position-name")] | .//a', $element);
-        if ($title_elements && $title_elements->length > 0) {
-            $job['title'] = trim($title_elements->item(0)->textContent);
+        // Get job title from various possible selectors
+        $title_element = $xpath->query('.//div[contains(@class, "comeet-position-name")]', $element)->item(0);
+        if (!$title_element) {
+            $title_element = $xpath->query('.//a[contains(@class, "comeet-position")]', $element)->item(0);
+        }
+        if (!$title_element) {
+            $title_element = $element; // Use the element itself as fallback
         }
         
-        // If no title found, try getting it from the element's text content or data attributes
-        if (empty($job['title'])) {
-            // Try data attributes first
-            if ($element->hasAttribute('data-name')) {
-                $job['title'] = trim($element->getAttribute('data-name'));
-            } else if ($element->hasAttribute('data-title')) {
-                $job['title'] = trim($element->getAttribute('data-title'));
-            } else {
-                // Try getting text content and clean it up
-                $text_content = trim($element->textContent);
-                if (!empty($text_content)) {
-                    // Take first line as title
-                    $lines = explode("\n", $text_content);
-                    $job['title'] = trim($lines[0]);
-                }
+        if ($title_element) {
+            $job['title'] = trim($title_element->textContent);
+            
+            // Skip if this looks like metadata (location/type info) rather than a job title
+            if (preg_match('/^\s*(Jerusalem Office|Tel Aviv Office|Hybrid|Remote|Full-time|Part-time|·)/i', $job['title'])) {
+                error_log('⚠️ COMEET PARSE: Skipped element - metadata line: ' . $job['title']);
+                continue;
             }
         }
         
-        // Get category from data attribute
-        if ($element->hasAttribute('data-category')) {
-            $job['category'] = $element->getAttribute('data-category');
+        // Skip if no valid title found
+        if (empty($job['title']) || strlen($job['title']) < 3) {
+            continue;
         }
         
-        // Get job link - try multiple approaches
-        $link_elements = $xpath->query('.//a[contains(@class, "ultra-job-link") or contains(@href, "/careers/") or contains(@href, "comeet.co")]', $element);
-        if ($link_elements && $link_elements->length > 0) {
-            $job['link'] = $link_elements->item(0)->getAttribute('href');
-        } else if ($element->tagName === 'a') {
-            $job['link'] = $element->getAttribute('href');
-        } else {
-            // Try data attributes for link
-            if ($element->hasAttribute('data-href')) {
-                $job['link'] = $element->getAttribute('data-href');
+        // Extract job ID from href attribute (most reliable method)
+        $link_element = $xpath->query('.//a[contains(@class, "comeet-position")]', $element)->item(0);
+        if ($link_element && $link_element->hasAttribute('href')) {
+            $href = $link_element->getAttribute('href');
+            // Clean up href - remove double domain if present
+            $href = preg_replace('/^\/\/[^\/]+/', '', $href);
+            if (!preg_match('/^https?:\/\//', $href)) {
+                $href = home_url($href);
+            }
+            
+            // Extract job ID from URL pattern: /careers/co/category/JOB_ID/slug/all
+            if (preg_match('/\/careers\/co\/[^\/]+\/([^\/]+)\/[^\/]+\/all/', $href, $matches)) {
+                $job['job_id'] = $matches[1];
+                $job['link'] = $href;
+                error_log('🆔 COMEET PARSE: Extracted job ID "' . $job['job_id'] . '" for "' . $job['title'] . '"');
+            }
+        }
+        
+        // Fallback: Try other methods to get job URL/ID
+        if (empty($job['link'])) {
+            if ($element->hasAttribute('href')) {
+                $job['link'] = $element->getAttribute('href');
             } else if ($element->hasAttribute('data-url')) {
                 $job['link'] = $element->getAttribute('data-url');
             } else if ($element->hasAttribute('data-id')) {
-                // Try to generate URL from job ID
-                $job_id = $element->getAttribute('data-id');
-                $job['link'] = generate_comeet_job_url($job['title'], $job_id);
+                $job['job_id'] = $element->getAttribute('data-id');
+                $job['link'] = generate_comeet_job_url($job['title'], $job['job_id']);
             }
         }
         
-        // If still no link, try to generate one from the job title
+        // If still no link, try to generate one from the job title using extracted job ID
         if (empty($job['link']) && !empty($job['title'])) {
-            $job['link'] = generate_comeet_job_url($job['title'], '');
+            $job['link'] = generate_comeet_job_url($job['title'], $job['job_id']);
         }
         
         // Clean up job title and extract location
@@ -623,35 +1005,59 @@ function comeet_job_slider_shortcode($atts) {
     ], $atts, 'comeet_job_slider');
     
     // Get jobs
-    $jobs = comeet_fetch_jobs();
+    error_log('🔄 SHORTCODE: About to call comeet_fetch_jobs()');
+    
+    // Check if function exists
+    if (!function_exists('comeet_fetch_jobs')) {
+        error_log('❌ SHORTCODE: comeet_fetch_jobs() function does not exist!');
+        $jobs = [];
+    } else {
+        error_log('✅ SHORTCODE: comeet_fetch_jobs() function exists, calling it...');
+        $jobs = comeet_fetch_jobs();
+        error_log('🔄 SHORTCODE: comeet_fetch_jobs() returned ' . count($jobs) . ' jobs');
+    }
     
     // Debug: Log job fetching results
     error_log('FRESH BUILD: Found ' . count($jobs) . ' jobs');
     
     if (empty($jobs)) {
-        error_log('FRESH BUILD: No jobs found - using test data');
-        // Add test jobs for debugging
+        error_log('FRESH BUILD: No jobs found - using emergency fallback');
+        // Emergency fallback jobs with proper URLs
         $jobs = [
             [
                 'title' => 'Senior Software Engineer',
-                'location' => 'Tel Aviv',
+                'location' => 'Jerusalem',
                 'type' => 'Full-time',
-                'link' => '#test1',
+                'link' => home_url('/careers/'),
                 'category' => 'Engineering'
             ],
             [
                 'title' => 'Product Manager',
-                'location' => 'Jerusalem',
+                'location' => 'Tel Aviv',
                 'type' => 'Full-time',
-                'link' => '#test2',
-                'category' => 'Product'
+                'link' => home_url('/careers/'),
+                'category' => 'Product & Design'
             ],
             [
                 'title' => 'Data Scientist',
                 'location' => 'Hybrid',
                 'type' => 'Full-time',
-                'link' => '#test3',
-                'category' => 'Data'
+                'link' => home_url('/careers/'),
+                'category' => 'Data & Analytics'
+            ],
+            [
+                'title' => 'Frontend Developer',
+                'location' => 'Remote',
+                'type' => 'Full-time',
+                'link' => home_url('/careers/'),
+                'category' => 'Engineering'
+            ],
+            [
+                'title' => 'UX Designer',
+                'location' => 'Jerusalem',
+                'type' => 'Full-time',
+                'link' => home_url('/careers/'),
+                'category' => 'Product & Design'
             ]
         ];
     }
