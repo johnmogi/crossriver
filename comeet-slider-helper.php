@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Comeet Slider Helper
  * Description: Enhanced job slider for Comeet with category filtering and RTL support.
- * Version: 2.0.1
+ * Version: 2.0.2
  * Author: אביב דיגיטל
  */
 
@@ -82,11 +82,18 @@ function comeet_categorize_job($job_title) {
 /**
  * Generate job URL using Comeet plugin methods
  */
-function comeet_generate_job_url($job_id = '', $job_title = '') {
-    if (!class_exists('Comeet')) {
+function generate_comeet_job_url($job_title, $job_id = '') {
+    if (empty($job_title)) {
         return '#';
     }
     
+    // Don't create Comeet instance if class doesn't exist
+    if (!class_exists('Comeet')) {
+        error_log('⚠️ COMEET URL: Comeet class not found');
+        return '#';
+    }
+    
+    // Wrap entire function in try-catch for production safety
     try {
         $comeet = new Comeet();
         
@@ -99,14 +106,24 @@ function comeet_generate_job_url($job_id = '', $job_title = '') {
                 
                 if ($required_params === 3) {
                     // Method expects (position_data, location, group) - create proper structure
+                    // Ensure we have proper array structure to avoid TypeError
                     $position_data = array(
-                        'name' => $job_title,
-                        'uid' => !empty($job_id) ? $job_id : '2C.E40',
-                        'post_id' => !empty($job_id) ? $job_id : '2C.E40'
+                        'name' => (string)$job_title,
+                        'uid' => !empty($job_id) ? (string)$job_id : '2C.E40',
+                        'post_id' => !empty($job_id) ? (string)$job_id : '2C.E40',
+                        'location' => array('name' => 'Jerusalem Office / Hybrid (In Israel)'),
+                        'department' => array('name' => 'All Departments')
                     );
                     $location = 'jerusalem-office-hybrid-in-israel';
                     $group = 'all';
-                    $url = $comeet->generate_sub_page_url($position_data, $location, $group);
+                    
+                    // Add try-catch to prevent fatal errors in production
+                    try {
+                        $url = $comeet->generate_sub_page_url($position_data, $location, $group);
+                    } catch (Exception $e) {
+                        error_log('⚠️ COMEET URL: generate_sub_page_url failed with proper data: ' . $e->getMessage());
+                        $url = null;
+                    }
                 } else if ($required_params === 1) {
                     $url = $comeet->generate_sub_page_url($job_title);
                 } else {
@@ -131,6 +148,11 @@ function comeet_generate_job_url($job_id = '', $job_title = '') {
                             }
                         }
                     } else {
+                        // Check for double domain issue and fix it
+                        if (strpos($url, 'c148-cross-river.local/c148-cross-river.local') !== false) {
+                            $url = str_replace('c148-cross-river.local/c148-cross-river.local', 'c148-cross-river.local', $url);
+                            error_log('✅ COMEET URL: Fixed double domain in URL: ' . $url);
+                        }
                         error_log('✅ COMEET URL: Generated URL for "' . $job_title . '": ' . $url);
                     }
                     return $url;
@@ -204,6 +226,10 @@ function comeet_generate_job_url($job_id = '', $job_title = '') {
         
     } catch (Exception $e) {
         error_log('❌ COMEET URL: Error generating job URL: ' . $e->getMessage());
+    } catch (TypeError $e) {
+        error_log('❌ COMEET URL: TypeError in production: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log('❌ COMEET URL: Fatal error prevented: ' . $e->getMessage());
     }
     
     // Final fallback
@@ -465,13 +491,13 @@ function comeet_parse_html_jobs($html_content) {
             } else if ($element->hasAttribute('data-id')) {
                 // Try to generate URL from job ID
                 $job_id = $element->getAttribute('data-id');
-                $job['link'] = comeet_generate_job_url($job_id, $job['title']);
+                $job['link'] = generate_comeet_job_url($job['title'], $job_id);
             }
         }
         
         // If still no link, try to generate one from the job title
         if (empty($job['link']) && !empty($job['title'])) {
-            $job['link'] = comeet_generate_job_url('', $job['title']);
+            $job['link'] = generate_comeet_job_url($job['title'], '');
         }
         
         // Clean up job title and extract location
@@ -1159,45 +1185,28 @@ function ultra_stable_jobs_shortcode($atts = []) {
             error_log('Sample job: ' . print_r(reset($jobs), true));
         }
         
-        // Enhanced fallback if no jobs found
+        // Enhanced fallback if no jobs found - but only as last resort
         if (empty($jobs)) {
-            error_log('ULTRA STABLE: No jobs found, using enhanced fallback data');
+            error_log('ULTRA STABLE: No jobs found from any source, using minimal fallback');
             $jobs = [
-                // Engineering jobs
-                ['title' => 'Senior Software Engineer', 'location' => 'Jerusalem Office', 'type' => 'Senior', 'link' => '#', 'category' => 'Engineering'],
-                ['title' => 'Frontend Developer', 'location' => 'Tel Aviv Office', 'type' => 'Mid-Level', 'link' => '#', 'category' => 'Engineering'],
-                ['title' => 'Backend Developer', 'location' => 'Hybrid', 'type' => 'Senior', 'link' => '#', 'category' => 'Engineering'],
-                ['title' => 'DevOps Engineer', 'location' => 'Remote', 'type' => 'Senior', 'link' => '#', 'category' => 'Engineering'],
-                
-                // Data & Analytics jobs
-                ['title' => 'Data Scientist', 'location' => 'Jerusalem Office', 'type' => 'Senior', 'link' => '#', 'category' => 'Data & Analytics'],
-                ['title' => 'Data Analyst', 'location' => 'Tel Aviv Office', 'type' => 'Mid-Level', 'link' => '#', 'category' => 'Data & Analytics'],
-                ['title' => 'Business Intelligence Analyst', 'location' => 'Hybrid', 'type' => 'Senior', 'link' => '#', 'category' => 'Data & Analytics'],
-                
-                // Product & Design jobs
-                ['title' => 'Product Manager', 'location' => 'Jerusalem Office', 'type' => 'Senior', 'link' => '#', 'category' => 'Product & Design'],
-                ['title' => 'UX Designer', 'location' => 'Tel Aviv Office', 'type' => 'Mid-Level', 'link' => '#', 'category' => 'Product & Design'],
-                ['title' => 'UI Designer', 'location' => 'Hybrid', 'type' => 'Junior', 'link' => '#', 'category' => 'Product & Design'],
-                
-                // Business jobs
-                ['title' => 'Sales Manager', 'location' => 'Jerusalem Office', 'type' => 'Senior', 'link' => '#', 'category' => 'Business'],
-                ['title' => 'Marketing Specialist', 'location' => 'Tel Aviv Office', 'type' => 'Mid-Level', 'link' => '#', 'category' => 'Business'],
-                ['title' => 'Business Development', 'location' => 'Remote', 'type' => 'Senior', 'link' => '#', 'category' => 'Business']
+                ['title' => 'No positions available', 'location' => 'Please check back later', 'type' => '', 'link' => '#', 'category' => 'Other']
             ];
-            
-            // Process locations in fallback data
-            foreach ($jobs as &$job) {
-                if (!empty($job['location'])) {
-                    $job['location'] = str_replace(' / Hybrid (In Israel)', '', $job['location']);
-                    error_log('Processed fallback location: ' . $job['location']);
-                }
-            }
         }
         
-        // Clean up job titles by removing location suffix if present
+        // Generate proper URLs for each job and clean up titles
         foreach ($jobs as &$job) {
+            // Clean up job titles by removing location suffix if present
             if (preg_match('/(.*?)\s*\/\s*Hybrid\s*\(In Israel\)$/i', $job['title'], $matches)) {
                 $job['title'] = trim($matches[1]);
+            }
+            
+            // Generate proper URL for each job
+            if (!empty($job['title']) && (!isset($job['link']) || empty($job['link']) || $job['link'] === '#')) {
+                $generated_url = generate_comeet_job_url($job['title']);
+                if (!empty($generated_url)) {
+                    $job['link'] = $generated_url;
+                    error_log('ULTRA JOBS: Generated URL for "' . $job['title'] . '": ' . $generated_url);
+                }
             }
         }
         unset($job); // Break the reference
@@ -1310,7 +1319,7 @@ function ultra_stable_jobs_shortcode($atts = []) {
             
             // Debug: Force URL generation if empty
             if (empty($job_url) || $job_url === '#') {
-                $job_url = comeet_generate_job_url('', $job['title']);
+                $job_url = generate_comeet_job_url($job['title'], '');
                 error_log('🔗 ULTRA JOBS: Generated URL for "' . $job['title'] . '": ' . $job_url);
             }
             
@@ -1530,7 +1539,7 @@ function live_job_url_debug_shortcode() {
                 
                 if (!empty($title) && $title !== 'NO TITLE') {
                     // Test our URL generation function
-                    $generated_url = comeet_generate_job_url('', $title);
+                    $generated_url = generate_comeet_job_url($title, '');
                     $url_color = ($generated_url === '#' || $generated_url === home_url('/careers/')) ? '#f79009' : '#56d364';
                     
                     $output .= '<span style="color: ' . $url_color . ';">Generated URL:</span><br>';
@@ -1638,7 +1647,7 @@ function simple_job_debug_shortcode() {
     foreach (array_slice($jobs, 0, 5) as $i => $job) {
         $title = $job['title'] ?? 'NO TITLE';
         $current_link = $job['link'] ?? 'NO LINK';
-        $generated_link = comeet_generate_job_url('', $title);
+        $generated_link = generate_comeet_job_url($title, '');
         
         $output .= '<div style="border: 1px solid white; margin: 10px 0; padding: 10px;">';
         $output .= '<strong>Job ' . ($i+1) . ':</strong> ' . esc_html($title) . '<br>';
@@ -1669,7 +1678,7 @@ function url_test_shortcode() {
         $output .= '<strong style="color: #63b3ed;">Test ' . ($i + 1) . ':</strong> ' . esc_html($job_title) . '<br>';
         
         // Generate URL
-        $generated_url = comeet_generate_job_url('test-id-' . ($i + 1), $job_title);
+        $generated_url = generate_comeet_job_url($job_title, 'test-id-' . ($i + 1));
         
         // Check if URL looks correct
         $is_malformed = strpos($generated_url, '?page_id=') !== false;
