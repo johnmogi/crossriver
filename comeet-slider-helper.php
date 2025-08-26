@@ -80,6 +80,137 @@ function comeet_categorize_job($job_title) {
 }
 
 /**
+ * Generate job URL using Comeet plugin methods
+ */
+function comeet_generate_job_url($job_id = '', $job_title = '') {
+    if (!class_exists('Comeet')) {
+        return '#';
+    }
+    
+    try {
+        $comeet = new Comeet();
+        
+        // Try generate_sub_page_url method first (requires 3 parameters)
+        if (method_exists($comeet, 'generate_sub_page_url') && !empty($job_title)) {
+            try {
+                // Check method signature using reflection
+                $reflection = new ReflectionMethod($comeet, 'generate_sub_page_url');
+                $required_params = $reflection->getNumberOfRequiredParameters();
+                
+                if ($required_params === 3) {
+                    // Method expects (position_data, location, group) - create proper structure
+                    $position_data = array(
+                        'name' => $job_title,
+                        'uid' => !empty($job_id) ? $job_id : '2C.E40',
+                        'post_id' => !empty($job_id) ? $job_id : '2C.E40'
+                    );
+                    $location = 'jerusalem-office-hybrid-in-israel';
+                    $group = 'all';
+                    $url = $comeet->generate_sub_page_url($position_data, $location, $group);
+                } else if ($required_params === 1) {
+                    $url = $comeet->generate_sub_page_url($job_title);
+                } else {
+                    error_log('⚠️ COMEET URL: generate_sub_page_url requires ' . $required_params . ' parameters');
+                    $url = null;
+                }
+                
+                if (!empty($url) && $url !== '#') {
+                    // Check if URL is malformed (contains page_id query parameter)
+                    if (strpos($url, '?page_id=') !== false) {
+                        error_log('⚠️ COMEET URL: Malformed URL detected: ' . $url);
+                        // Extract the path part after page_id= and reconstruct proper URL
+                        $parsed = parse_url($url);
+                        if (isset($parsed['query'])) {
+                            parse_str($parsed['query'], $query_params);
+                            if (isset($query_params['page_id'])) {
+                                $path_part = $query_params['page_id'];
+                                // Clean up the path and create proper URL
+                                $clean_path = trim($path_part, '/');
+                                $url = home_url('/careers/' . $clean_path . '/');
+                                error_log('✅ COMEET URL: Fixed malformed URL to: ' . $url);
+                            }
+                        }
+                    } else {
+                        error_log('✅ COMEET URL: Generated URL for "' . $job_title . '": ' . $url);
+                    }
+                    return $url;
+                }
+            } catch (Exception $e) {
+                error_log('⚠️ COMEET URL: generate_sub_page_url failed: ' . $e->getMessage());
+            }
+        }
+        
+        // Try generate_careers_url method
+        if (method_exists($comeet, 'generate_careers_url')) {
+            try {
+                // Check method signature using reflection
+                $reflection = new ReflectionMethod($comeet, 'generate_careers_url');
+                $required_params = $reflection->getNumberOfRequiredParameters();
+                
+                if ($required_params >= 3) {
+                    // Method expects 3 parameters
+                    $base_url = $comeet->generate_careers_url('jerusalem-office-hybrid-in-israel', 'all', '2C.E40');
+                } else {
+                    $base_url = $comeet->generate_careers_url();
+                }
+                
+                if (!empty($base_url) && !empty($job_title)) {
+                    // Create slug from job title
+                    $slug = sanitize_title($job_title);
+                    $url = rtrim($base_url, '/') . '/' . $slug . '/';
+                    error_log('✅ COMEET URL: Generated careers URL: ' . $url);
+                    return $url;
+                }
+            } catch (Exception $e) {
+                error_log('⚠️ COMEET URL: generate_careers_url failed: ' . $e->getMessage());
+            }
+        }
+        
+        // Try to get URL pattern from Comeet options
+        if (method_exists($comeet, 'get_options')) {
+            $options = $comeet->get_options();
+            if (is_array($options)) {
+                // Look for URL patterns in options
+                foreach ($options as $key => $value) {
+                    if ((stripos($key, 'career') !== false || stripos($key, 'page') !== false) && 
+                        !empty($value) && is_string($value) && 
+                        (strpos($value, 'http') === 0 || strpos($value, '/') === 0)) {
+                        
+                        $base_url = $value;
+                        if (!empty($job_title)) {
+                            $slug = sanitize_title($job_title);
+                            $url = rtrim($base_url, '/') . '/' . $slug . '/';
+                            error_log('✅ COMEET URL: Generated from options (' . $key . '): ' . $url);
+                            return $url;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Fallback: construct URL based on site structure
+        $careers_base = home_url('/careers/');
+        if (!empty($job_title)) {
+            // Create URL pattern similar to: /careers/co/location/id/job-title/all/
+            $slug = sanitize_title($job_title);
+            $location_slug = 'jerusalem-office-hybrid-in-israel';
+            $job_id_placeholder = !empty($job_id) ? $job_id : '2C.E40';
+            
+            $url = $careers_base . 'co/' . $location_slug . '/' . $job_id_placeholder . '/' . $slug . '/all/';
+            error_log('✅ COMEET URL: Generated fallback URL: ' . $url);
+            return $url;
+        }
+        
+    } catch (Exception $e) {
+        error_log('❌ COMEET URL: Error generating job URL: ' . $e->getMessage());
+    }
+    
+    // Final fallback
+    return home_url('/careers/');
+}
+
+/**
  * Enhanced fetch jobs from Comeet with comprehensive debugging
  */
 function comeet_fetch_jobs() {
@@ -331,7 +462,16 @@ function comeet_parse_html_jobs($html_content) {
                 $job['link'] = $element->getAttribute('data-href');
             } else if ($element->hasAttribute('data-url')) {
                 $job['link'] = $element->getAttribute('data-url');
+            } else if ($element->hasAttribute('data-id')) {
+                // Try to generate URL from job ID
+                $job_id = $element->getAttribute('data-id');
+                $job['link'] = comeet_generate_job_url($job_id, $job['title']);
             }
+        }
+        
+        // If still no link, try to generate one from the job title
+        if (empty($job['link']) && !empty($job['title'])) {
+            $job['link'] = comeet_generate_job_url('', $job['title']);
         }
         
         // Clean up job title and extract location
@@ -1162,17 +1302,23 @@ function ultra_stable_jobs_shortcode($atts = []) {
             $output .= '</div>';
         }
         
+        // Jobs grid
         $output .= '<div class="ultra-jobs-grid">';
-        
         foreach ($jobs as $job) {
-            $output .= '<div class="ultra-job-card" data-category="' . esc_attr($job['category'] ?? 'Other') . '">';
-            $output .= '<h3 class="ultra-job-title">' . esc_html($job['title']) . '</h3>';
+            $category = isset($job['category']) ? $job['category'] : 'Other';
+            $job_url = isset($job['link']) ? $job['link'] : '#';
             
-            if (!empty($job['location'])) {
-                $output .= '<div class="ultra-job-meta"><strong>מיקום:</strong> ' . esc_html($job['location']) . '</div>';
+            // Debug: Force URL generation if empty
+            if (empty($job_url) || $job_url === '#') {
+                $job_url = comeet_generate_job_url('', $job['title']);
+                error_log('🔗 ULTRA JOBS: Generated URL for "' . $job['title'] . '": ' . $job_url);
             }
             
-            $output .= '<a href="' . esc_url($job['link']) . '" class="ultra-job-link" target="_blank">לפרטים והגשת מועמדות</a>';
+            $output .= '<div class="ultra-job-card" data-category="' . esc_attr($category) . '">';
+            $output .= '<h3 class="ultra-job-title">' . esc_html($job['title']) . '</h3>';
+            $output .= '<div class="ultra-job-meta"><strong>מיקום:</strong> ' . esc_html($job['location']) . '</div>';
+            $output .= '<a href="' . esc_url($job_url) . '" class="ultra-job-link" target="_blank">לפרטים והגשת מועמדות</a>';
+            $output .= '<!-- DEBUG: URL = ' . esc_html($job_url) . ' -->';
             $output .= '</div>';
         }
         
@@ -1186,6 +1332,359 @@ function ultra_stable_jobs_shortcode($atts = []) {
     }
 }
 add_shortcode('ultra_jobs', 'ultra_stable_jobs_shortcode');
+
+// DEBUG: Job Link Inspector - Shows detailed job data and URLs
+function job_link_debug_shortcode() {
+    $output = '<div style="background: #1a1a2e; color: white; padding: 30px; margin: 20px 0; border-radius: 10px; font-family: monospace; max-height: 800px; overflow-y: auto;">';
+    $output .= '<h2 style="color: #e74c3c;">🔗 JOB LINK DEBUG INSPECTOR</h2>';
+    
+    try {
+        // Get jobs using our function
+        $jobs = comeet_fetch_jobs();
+        $output .= '<p><strong>Jobs found:</strong> ' . count($jobs) . '</p>';
+        
+        if (!empty($jobs)) {
+            $output .= '<h3 style="color: #f39c12;">📋 JOB DATA STRUCTURE:</h3>';
+            
+            foreach ($jobs as $index => $job) {
+                $output .= '<div style="border: 2px solid #555; margin: 15px 0; padding: 20px; border-radius: 8px; background: rgba(0,0,0,0.3);">';
+                $output .= '<h4 style="color: #3498db;">Job #' . ($index + 1) . '</h4>';
+                
+                // Show all job properties
+                foreach ($job as $key => $value) {
+                    $output .= '<p><strong>' . esc_html($key) . ':</strong> ';
+                    
+                    if (is_string($value)) {
+                        if (strlen($value) > 200) {
+                            $output .= '<span style="color: #2ecc71;">' . esc_html(substr($value, 0, 200)) . '...</span>';
+                        } else {
+                            $output .= '<span style="color: #2ecc71;">' . esc_html($value) . '</span>';
+                        }
+                    } else {
+                        $output .= '<span style="color: #e67e22;">' . esc_html(print_r($value, true)) . '</span>';
+                    }
+                    $output .= '</p>';
+                }
+                
+                $output .= '</div>';
+            }
+        }
+        
+        // Test Comeet plugin methods for URL generation
+        if (class_exists('Comeet')) {
+            $output .= '<h3 style="color: #f39c12;">🔍 COMEET URL GENERATION METHODS:</h3>';
+            
+            $comeet = new Comeet();
+            $methods = get_class_methods($comeet);
+            
+            $url_methods = [];
+            foreach ($methods as $method) {
+                if (stripos($method, 'url') !== false || 
+                    stripos($method, 'link') !== false || 
+                    stripos($method, 'page') !== false ||
+                    stripos($method, 'generate') !== false) {
+                    $url_methods[] = $method;
+                }
+            }
+            
+            $output .= '<p><strong>URL-related methods found:</strong> ' . implode(', ', $url_methods) . '</p>';
+            
+            // Test specific URL generation methods
+            $test_methods = ['generate_careers_url', 'generate_sub_page_url', 'get_url', 'get_current_url'];
+            
+            foreach ($test_methods as $method) {
+                if (method_exists($comeet, $method)) {
+                    $output .= '<div style="border: 1px solid #666; margin: 10px 0; padding: 15px; border-radius: 5px;">';
+                    $output .= '<h4 style="color: #3498db;">' . $method . '()</h4>';
+                    
+                    try {
+                        $reflection = new ReflectionMethod($comeet, $method);
+                        $required_params = $reflection->getNumberOfRequiredParameters();
+                        
+                        if ($required_params === 0) {
+                            $result = $comeet->$method();
+                            $output .= '<p><strong>Result:</strong> ' . esc_html($result) . '</p>';
+                        } else {
+                            $output .= '<p><strong>Requires parameters:</strong> ' . $required_params . '</p>';
+                            
+                            // Try with sample data if it's a URL generation method
+                            if ($method === 'generate_sub_page_url' && !empty($jobs)) {
+                                $sample_job = reset($jobs);
+                                if (isset($sample_job['title'])) {
+                                    try {
+                                        // Use proper 3-parameter call for generate_sub_page_url
+                                        if ($required_params >= 3) {
+                                            $position_data = [
+                                                'name' => $sample_job['title'],
+                                                'uid' => isset($sample_job['id']) ? $sample_job['id'] : 'test-id',
+                                                'post_id' => isset($sample_job['id']) ? $sample_job['id'] : 'test-id'
+                                            ];
+                                            $test_url = $comeet->generate_sub_page_url($position_data, 'jerusalem-office-hybrid-in-israel', 'all');
+                                        } else {
+                                            $test_url = $comeet->generate_sub_page_url($sample_job['title']);
+                                        }
+                                        $output .= '<p><strong>Test with "' . esc_html($sample_job['title']) . '":</strong> ' . esc_html($test_url) . '</p>';
+                                    } catch (Exception $e) {
+                                        $output .= '<p><strong>Test failed:</strong> ' . esc_html($e->getMessage()) . '</p>';
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception $e) {
+                        $output .= '<p style="color: #e74c3c;"><strong>Error:</strong> ' . esc_html($e->getMessage()) . '</p>';
+                    }
+                    
+                    $output .= '</div>';
+                }
+            }
+            
+            // Check Comeet options for URL patterns
+            $options = $comeet->get_options();
+            if (is_array($options)) {
+                $output .= '<h3 style="color: #f39c12;">⚙️ COMEET URL CONFIGURATION:</h3>';
+                
+                $url_related_options = [];
+                foreach ($options as $key => $value) {
+                    if (stripos($key, 'url') !== false || 
+                        stripos($key, 'page') !== false || 
+                        stripos($key, 'link') !== false ||
+                        stripos($key, 'career') !== false ||
+                        stripos($key, 'position') !== false) {
+                        $url_related_options[$key] = $value;
+                    }
+                }
+                
+                if (!empty($url_related_options)) {
+                    foreach ($url_related_options as $key => $value) {
+                        $output .= '<p><strong>' . esc_html($key) . ':</strong> ' . esc_html($value) . '</p>';
+                    }
+                } else {
+                    $output .= '<p>No URL-related options found in Comeet configuration.</p>';
+                }
+            }
+        }
+        
+    } catch (Exception $e) {
+        $output .= '<p style="color: #e74c3c;">❌ Error: ' . esc_html($e->getMessage()) . '</p>';
+    }
+    
+    $output .= '</div>';
+    return $output;
+}
+add_shortcode('job_link_debug', 'job_link_debug_shortcode');
+
+// LIVE JOB URL DEBUGGER - Shows actual job listings and their generated URLs
+function live_job_url_debug_shortcode() {
+    $output = '<div style="background: #0d1117; color: #f0f6fc; padding: 30px; margin: 20px 0; border-radius: 10px; font-family: monospace; border: 2px solid #30363d;">';
+    $output .= '<h2 style="color: #f85149; margin-top: 0;">🔍 LIVE JOB URL DEBUGGER</h2>';
+    
+    try {
+        // Get the actual jobs being displayed
+        $jobs = comeet_fetch_jobs();
+        $job_count = count($jobs);
+        
+        $output .= '<div style="background: #161b22; padding: 20px; border-radius: 8px; margin: 15px 0; border: 1px solid #30363d;">';
+        $output .= '<h3 style="color: #7c3aed; margin-top: 0;">📊 JOB FETCH RESULTS</h3>';
+        $output .= '<p><strong>Total Jobs Found:</strong> <span style="color: #56d364;">' . $job_count . '</span></p>';
+        $output .= '</div>';
+        
+        if ($job_count > 0) {
+            $output .= '<h3 style="color: #f79009;">🎯 JOB LISTINGS & GENERATED URLS</h3>';
+            
+            foreach ($jobs as $index => $job) {
+                $job_num = $index + 1;
+                $output .= '<div style="background: #21262d; padding: 20px; margin: 15px 0; border-radius: 8px; border-left: 4px solid #f85149;">';
+                
+                // Job header
+                $output .= '<h4 style="color: #58a6ff; margin-top: 0;">Job #' . $job_num . '</h4>';
+                
+                // Job details table
+                $output .= '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
+                
+                // Title
+                $title = isset($job['title']) ? $job['title'] : 'NO TITLE';
+                $output .= '<tr><td style="padding: 8px; border: 1px solid #30363d; background: #0d1117; font-weight: bold; width: 120px;">Title:</td>';
+                $output .= '<td style="padding: 8px; border: 1px solid #30363d; color: #7c3aed;">' . esc_html($title) . '</td></tr>';
+                
+                // Category
+                $category = isset($job['category']) ? $job['category'] : 'NO CATEGORY';
+                $output .= '<tr><td style="padding: 8px; border: 1px solid #30363d; background: #0d1117; font-weight: bold;">Category:</td>';
+                $output .= '<td style="padding: 8px; border: 1px solid #30363d; color: #f79009;">' . esc_html($category) . '</td></tr>';
+                
+                // Location
+                $location = isset($job['location']) ? $job['location'] : 'NO LOCATION';
+                $output .= '<tr><td style="padding: 8px; border: 1px solid #30363d; background: #0d1117; font-weight: bold;">Location:</td>';
+                $output .= '<td style="padding: 8px; border: 1px solid #30363d; color: #56d364;">' . esc_html($location) . '</td></tr>';
+                
+                // Current Link
+                $current_link = isset($job['link']) ? $job['link'] : 'NO LINK';
+                $link_status = empty($current_link) || $current_link === '#' ? '❌ EMPTY' : '✅ HAS LINK';
+                $link_color = empty($current_link) || $current_link === '#' ? '#f85149' : '#56d364';
+                
+                $output .= '<tr><td style="padding: 8px; border: 1px solid #30363d; background: #0d1117; font-weight: bold;">Current Link:</td>';
+                $output .= '<td style="padding: 8px; border: 1px solid #30363d; color: ' . $link_color . ';">' . $link_status . '<br>';
+                $output .= '<code style="background: #161b22; padding: 4px; border-radius: 4px; font-size: 11px;">' . esc_html($current_link) . '</code></td></tr>';
+                
+                // Test URL Generation
+                $output .= '<tr><td style="padding: 8px; border: 1px solid #30363d; background: #0d1117; font-weight: bold;">URL Generation Test:</td><td style="padding: 8px; border: 1px solid #30363d;">';
+                
+                if (!empty($title) && $title !== 'NO TITLE') {
+                    // Test our URL generation function
+                    $generated_url = comeet_generate_job_url('', $title);
+                    $url_color = ($generated_url === '#' || $generated_url === home_url('/careers/')) ? '#f79009' : '#56d364';
+                    
+                    $output .= '<span style="color: ' . $url_color . ';">Generated URL:</span><br>';
+                    $output .= '<code style="background: #161b22; padding: 4px; border-radius: 4px; font-size: 11px; color: #58a6ff;">' . esc_html($generated_url) . '</code><br>';
+                    
+                    // Show what the target should be
+                    $slug = sanitize_title($title);
+                    $target_url = home_url('/careers/co/jerusalem-office-hybrid-in-israel/2C.E40/' . $slug . '/all/');
+                    $output .= '<span style="color: #7c3aed;">Target Pattern:</span><br>';
+                    $output .= '<code style="background: #161b22; padding: 4px; border-radius: 4px; font-size: 11px; color: #7c3aed;">' . esc_html($target_url) . '</code>';
+                } else {
+                    $output .= '<span style="color: #f85149;">❌ Cannot generate - no title</span>';
+                }
+                
+                $output .= '</td></tr>';
+                $output .= '</table>';
+                $output .= '</div>';
+            }
+            
+            // Test Comeet URL methods
+            $output .= '<div style="background: #161b22; padding: 20px; border-radius: 8px; margin: 15px 0; border: 1px solid #30363d;">';
+            $output .= '<h3 style="color: #f79009; margin-top: 0;">🔧 COMEET URL METHOD TESTS</h3>';
+            
+            if (class_exists('Comeet')) {
+                $comeet = new Comeet();
+                
+                // Test generate_sub_page_url
+                if (method_exists($comeet, 'generate_sub_page_url')) {
+                    $sample_job = reset($jobs);
+                    if ($sample_job && !empty($sample_job['title'])) {
+                        try {
+                            // Use reflection to determine parameter count and call appropriately
+                            $reflection = new ReflectionMethod($comeet, 'generate_sub_page_url');
+                            $required_params = $reflection->getNumberOfRequiredParameters();
+                            
+                            if ($required_params >= 3) {
+                                $position_data = [
+                                    'name' => $sample_job['title'],
+                                    'uid' => isset($sample_job['id']) ? $sample_job['id'] : 'test-id',
+                                    'post_id' => isset($sample_job['id']) ? $sample_job['id'] : 'test-id'
+                                ];
+                                $test_url = $comeet->generate_sub_page_url($position_data, 'jerusalem-office-hybrid-in-israel', '2C.E40');
+                                $output .= '<p><strong>generate_sub_page_url(3 params):</strong><br>';
+                            } else {
+                                $test_url = $comeet->generate_sub_page_url($sample_job['title']);
+                                $output .= '<p><strong>generate_sub_page_url(1 param):</strong><br>';
+                            }
+                            $output .= '<code style="background: #0d1117; padding: 4px; border-radius: 4px; color: #58a6ff;">' . esc_html($test_url) . '</code></p>';
+                        } catch (Exception $e) {
+                            $output .= '<p><strong>generate_sub_page_url:</strong> <span style="color: #f85149;">Error - ' . esc_html($e->getMessage()) . '</span></p>';
+                        }
+                    }
+                }
+                
+                // Test generate_careers_url
+                if (method_exists($comeet, 'generate_careers_url')) {
+                    try {
+                        // Check method signature using reflection
+                        $reflection = new ReflectionMethod($comeet, 'generate_careers_url');
+                        $required_params = $reflection->getNumberOfRequiredParameters();
+                        
+                        if ($required_params >= 3) {
+                            // Method expects 3 parameters
+                            $careers_url = $comeet->generate_careers_url('jerusalem-office-hybrid-in-israel', 'all', '2C.E40');
+                        } else {
+                            $careers_url = $comeet->generate_careers_url();
+                        }
+                        
+                        $output .= '<p><strong>generate_careers_url():</strong><br>';
+                        $output .= '<code style="background: #0d1117; padding: 4px; border-radius: 4px; color: #58a6ff;">' . esc_html($careers_url) . '</code></p>';
+                    } catch (Exception $e) {
+                        $output .= '<p><strong>generate_careers_url:</strong> <span style="color: #f85149;">Error - ' . esc_html($e->getMessage()) . '</span></p>';
+                    }
+                }
+                
+            } else {
+                $output .= '<p style="color: #f85149;">❌ Comeet class not available</p>';
+            }
+            
+            $output .= '</div>';
+            
+        } else {
+            $output .= '<div style="background: #161b22; padding: 20px; border-radius: 8px; margin: 15px 0; border: 1px solid #f85149;">';
+            $output .= '<p style="color: #f85149;">❌ No jobs found to debug</p>';
+            $output .= '</div>';
+        }
+        
+    } catch (Exception $e) {
+        $output .= '<div style="background: #161b22; padding: 20px; border-radius: 8px; margin: 15px 0; border: 1px solid #f85149;">';
+        $output .= '<p style="color: #f85149;">❌ Debug Error: ' . esc_html($e->getMessage()) . '</p>';
+        $output .= '</div>';
+    }
+    
+    $output .= '</div>';
+    return $output;
+}
+add_shortcode('live_job_debug', 'live_job_url_debug_shortcode');
+
+// SIMPLE DEBUG FUNCTION - Add this to any page to see job URLs
+function simple_job_debug_shortcode() {
+    $jobs = comeet_fetch_jobs();
+    $output = '<div style="background: red; color: white; padding: 20px; font-family: monospace;">';
+    $output .= '<h3>🔍 SIMPLE JOB DEBUG (' . count($jobs) . ' jobs)</h3>';
+    
+    foreach (array_slice($jobs, 0, 5) as $i => $job) {
+        $title = $job['title'] ?? 'NO TITLE';
+        $current_link = $job['link'] ?? 'NO LINK';
+        $generated_link = comeet_generate_job_url('', $title);
+        
+        $output .= '<div style="border: 1px solid white; margin: 10px 0; padding: 10px;">';
+        $output .= '<strong>Job ' . ($i+1) . ':</strong> ' . esc_html($title) . '<br>';
+        $output .= '<strong>Current Link:</strong> ' . esc_html($current_link) . '<br>';
+        $output .= '<strong>Generated Link:</strong> ' . esc_html($generated_link) . '<br>';
+        $output .= '</div>';
+    }
+    
+    $output .= '</div>';
+    return $output;
+}
+add_shortcode('simple_debug', 'simple_job_debug_shortcode');
+
+// URL TEST SHORTCODE - Quick test for URL generation fixes
+function url_test_shortcode() {
+    $output = '<div style="background: #2d3748; color: #e2e8f0; padding: 20px; margin: 20px 0; border-radius: 8px; font-family: monospace;">';
+    $output .= '<h3 style="color: #4fd1c7; margin-top: 0;">🔧 URL GENERATION TEST</h3>';
+    
+    // Test sample job titles
+    $test_jobs = [
+        'Senior Software Engineer',
+        'Product Manager - Growth',
+        'Data Scientist'
+    ];
+    
+    foreach ($test_jobs as $i => $job_title) {
+        $output .= '<div style="background: #1a202c; padding: 15px; margin: 10px 0; border-radius: 6px; border-left: 4px solid #4fd1c7;">';
+        $output .= '<strong style="color: #63b3ed;">Test ' . ($i + 1) . ':</strong> ' . esc_html($job_title) . '<br>';
+        
+        // Generate URL
+        $generated_url = comeet_generate_job_url('test-id-' . ($i + 1), $job_title);
+        
+        // Check if URL looks correct
+        $is_malformed = strpos($generated_url, '?page_id=') !== false;
+        $status_color = $is_malformed ? '#f56565' : '#68d391';
+        $status_text = $is_malformed ? '❌ MALFORMED' : '✅ CLEAN';
+        
+        $output .= '<strong>Generated URL:</strong> <span style="color: ' . $status_color . ';">' . $status_text . '</span><br>';
+        $output .= '<code style="background: #0d1117; padding: 4px; border-radius: 4px; color: #58a6ff; word-break: break-all;">' . esc_html($generated_url) . '</code>';
+        $output .= '</div>';
+    }
+    
+    $output .= '</div>';
+    return $output;
+}
+add_shortcode('url_test', 'url_test_shortcode');
 
 add_action('wp_enqueue_scripts', function() {
     wp_enqueue_style('heebo-font','https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&display=swap',[],null);
